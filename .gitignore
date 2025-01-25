@@ -1,9 +1,0 @@
-node_modules
-.idea
-pi
-dist
-assets/config.ts
-assets/config-pi.ts
-assets/config-pi-test.ts
-data.db
-id_rsa*

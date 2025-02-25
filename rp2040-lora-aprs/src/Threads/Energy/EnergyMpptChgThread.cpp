@@ -2,7 +2,7 @@
 #include "ArduinoLog.h"
 #include "System.h"
 
-EnergyMpptChgThread::EnergyMpptChgThread(System *system) : EnergyThread(system, PSTR("ENERGY_MPPTCHG")) {
+EnergyMpptChgThread::EnergyMpptChgThread(System *system, uint16_t *ocv, const size_t numOcvPoints) : EnergyThread(system, PSTR("ENERGY_MPPTCHG"), ocv, numOcvPoints) {
     charger = &system->mpptChgCharger;
 }
 

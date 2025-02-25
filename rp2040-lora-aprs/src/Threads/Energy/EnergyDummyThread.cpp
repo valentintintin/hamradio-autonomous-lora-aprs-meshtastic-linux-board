@@ -1,6 +1,6 @@
 #include "Threads/Energy/EnergyDummyThread.h"
 
-EnergyDummyThread::EnergyDummyThread(System *system) : EnergyThread(system, PSTR("ENERGY_DUMMY")) {}
+EnergyDummyThread::EnergyDummyThread(System *system) : EnergyThread(system, PSTR("ENERGY_DUMMY"), new uint16_t[2] { 13000, 11000 }, 2) {}
 
 bool EnergyDummyThread::init() {
     // Init a random ?

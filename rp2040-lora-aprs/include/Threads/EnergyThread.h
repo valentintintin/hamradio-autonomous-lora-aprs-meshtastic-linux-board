@@ -1,15 +1,16 @@
-#ifndef CUBECELL_MONITORING_ENERGY_H
-#define CUBECELL_MONITORING_ENERGY_H
+#ifndef MONITORING_ENERGY_H
+#define MONITORING_ENERGY_H
 
 #include "MyThread.h"
-#include "Timer.h"
 #include "mpptChg.h"
 #include "Communication.h"
 #include "config.h"
 
 class EnergyThread : public MyThread {
 public:
-    explicit EnergyThread(System *system, const char *name);
+    explicit EnergyThread(System *system, const char *name, uint16_t *ocv = nullptr, size_t numOcvPoints = 0, uint8_t numCells = 1);
+
+    uint8_t getBatteryPercentage() const;
 
     inline int16_t getVoltageBattery() const {
         return vb;
@@ -48,6 +49,10 @@ protected:
     }
 
     int16_t vs = 0, is = 0, vb = 0, ib = 0;
+private:
+    uint8_t numCells = 1;
+    uint16_t *ocv;
+    size_t numOcvPoints = 0;
 };
 
-#endif //CUBECELL_MONITORING_ENERGY_H
+#endif //MONITORING_ENERGY_H

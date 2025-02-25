@@ -72,7 +72,7 @@ void Communication::update() {
         Log.traceln(F("[LORA] Interrupt with flags : %d"), irqFlags);
 
         if (irqFlags & RADIOLIB_SX126X_IRQ_RX_DONE) {
-            memset(buffer, '\0', sizeof(buffer));
+            memset(buffer, '\0', TRX_BUFFER);
             const size_t size = lora.getPacketLength();
             const int state = lora.readData(buffer, size);
             if (state == RADIOLIB_ERR_NONE && size >= 15) {
@@ -141,7 +141,7 @@ bool Communication::send(const size_t size) {
     uint8_t i = 0;
     while (i++ < 3 && isChannelActive()) {
         startReceive();
-        delayWdt(1000);
+        delayWdt(TIME_WAIT_CHANNEL_ACTIVE);
     }
     if (i == 3) {
         Log.errorln(F("[LORA_TX] Can't send because too much signal on channel"));
@@ -202,7 +202,7 @@ void Communication::prepareTelemetry() {
     system->settings.aprs.telemetrySequenceNumber = aprsPacketTx.telemetries.telemetrySequenceNumber;
     system->saveSettings();
 
-    sprintf_P(aprsPacketTx.comment, PSTR("Up:%ld"), millis() / 1000);
+    sprintf_P(aprsPacketTx.comment, PSTR("Bat:%d%% Up:%ld"), system->energyThread->getBatteryPercentage(), millis() / 1000);
 
     double temperatureBox = 0;
     double temperatureBoxNb = 0;
@@ -234,10 +234,11 @@ void Communication::prepareTelemetry() {
 
     i = 0;
 
-    aprsPacketTx.telemetries.telemetriesBoolean[i++].value = system->ldrBoxOpenedThread->isBoxOpened();
-    aprsPacketTx.telemetries.telemetriesBoolean[i++].value = system->watchdogMeshtastic->isFed();
-    aprsPacketTx.telemetries.telemetriesBoolean[i++].value = system->watchdogLinux->isFed();
+    // aprsPacketTx.telemetries.telemetriesBoolean[i++].value = system->ldrBoxOpenedThread->isBoxOpened();
+    aprsPacketTx.telemetries.telemetriesBoolean[i++].value = system->watchdogMeshtastic->enabled ? system->watchdogMeshtastic->isFed() : system->watchdogMeshtastic->isGpioOn();
+    aprsPacketTx.telemetries.telemetriesBoolean[i++].value = system->watchdogLinux->enabled ? system->watchdogLinux->isFed() : system->watchdogLinux->isGpioOn();
     aprsPacketTx.telemetries.telemetriesBoolean[i++].value = system->getGpio(system->settings.linux.wifiPin)->getState() || system->getGpio(system->settings.linux.nprPin)->getState();
+    aprsPacketTx.telemetries.telemetriesBoolean[i++].value = system->hasError();
 }
 
 bool Communication::sendTelemetry() {
@@ -298,10 +299,11 @@ bool Communication::sendTelemetryParams() {
 
     i = 0;
 
+    // strcpy_P(aprsPacketTx.telemetries.telemetriesBoolean[i++].name, PSTR("Box"));
     strcpy_P(aprsPacketTx.telemetries.telemetriesBoolean[i++].name, PSTR("Msh"));
-    strcpy_P(aprsPacketTx.telemetries.telemetriesBoolean[i++].name, PSTR("Box"));
     strcpy_P(aprsPacketTx.telemetries.telemetriesBoolean[i++].name, PSTR("Lnx"));
     strcpy_P(aprsPacketTx.telemetries.telemetriesBoolean[i++].name, PSTR("Lnk"));
+    strcpy_P(aprsPacketTx.telemetries.telemetriesBoolean[i++].name, PSTR("Err"));
 
     aprsPacketTx.type = TelemetryLabel;
     bool result = sendAprsFrame();
@@ -328,7 +330,7 @@ bool Communication::sendPosition(const char* comment) {
     aprsPacketTx.position.overlay = settings.symbolTable;
     aprsPacketTx.position.latitude = settings.latitude;
     aprsPacketTx.position.longitude = settings.longitude;
-    aprsPacketTx.position.altitudeFeet = settings.altitude * 3.28;
+    aprsPacketTx.position.altitudeFeet = settings.altitude * 3.28f;
     aprsPacketTx.position.altitudeInComment = false;
 
     aprsPacketTx.type = Position;
@@ -383,7 +385,7 @@ bool Communication::sendItem(const char *name, const char symbol, const char sym
 
     aprsPacketTx.position.latitude = latitude;
     aprsPacketTx.position.longitude = longitude;
-    aprsPacketTx.position.altitudeFeet = altitude * 3.28;
+    aprsPacketTx.position.altitudeFeet = altitude * 3.28f;
     aprsPacketTx.position.altitudeInComment = false;
 
     aprsPacketTx.position.symbol = symbol;
@@ -407,6 +409,8 @@ void Communication::sent() {
     }
 
     startReceive();
+
+    delayWdt(TIME_AFTER_TX); // Time for others receivers to return to RX mode. It is a test where I missed some frames
 }
 
 void Communication::received(uint8_t * payload, const uint16_t size, const float rssi, const float snr) {
@@ -423,13 +427,18 @@ void Communication::received(uint8_t * payload, const uint16_t size, const float
 
     if (!Aprs::decode(reinterpret_cast<const char *>(payload + sizeof(uint8_t) * 3), &aprsPacketRx)) {
         Log.warningln(F("[APRS] Error during decode, KISS ?"));
-        system->sendToSerial(payload, size);
+        system->sendToKissInterface(payload, size);
     } else {
         Log.traceln(F("[APRS] Decoded from %s to %s via %s"), aprsPacketRx.source, aprsPacketRx.destination, aprsPacketRx.path);
 
         system->addAprsFrameReceivedToHistory(&aprsPacketRx, snr, rssi);
 
         const SettingsAprs settings = system->settings.aprs;
+
+        if (strcasecmp(aprsPacketRx.source, settings.call) == 0) {
+            Log.warningln(F("[APRS] It's from us. Bug ? Ignore it"));
+            return;
+        }
 
         if (strstr(aprsPacketRx.message.destination, settings.call) != nullptr) {
             Log.traceln(F("[APRS] Message for me : %s"), aprsPacketRx.message.message);
@@ -439,11 +448,9 @@ void Communication::received(uint8_t * payload, const uint16_t size, const float
                     shouldTx = sendMessage(aprsPacketRx.source, PSTR(""), aprsPacketRx.message.ackToConfirm);
                 }
 
-                const bool processCommandResult = system->command.processCommand(nullptr, aprsPacketRx.message.message);
+                system->command.processCommand(nullptr, aprsPacketRx.message.message);
 
-                sprintf_P(bufferText, PSTR("%s: %s"), processCommandResult ? PSTR("OK") : PSTR("KO"), system->command.response);
-
-                shouldTx |= sendMessage(aprsPacketRx.source, bufferText);
+                shouldTx |= sendMessage(aprsPacketRx.source, system->command.response);
             }
         } else if (settings.digipeaterEnabled) {
             shouldTx = Aprs::canBeDigipeated(aprsPacketRx.path, settings.call);

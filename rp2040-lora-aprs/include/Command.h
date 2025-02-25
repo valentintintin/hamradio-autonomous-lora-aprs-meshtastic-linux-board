@@ -1,12 +1,12 @@
-#ifndef CUBECELL_MONITORING_COMMAND_H
-#define CUBECELL_MONITORING_COMMAND_H
+#ifndef MONITORING_COMMAND_H
+#define MONITORING_COMMAND_H
 
 #include <CommandParser.h>
 
 class System;
 
 //                  COMMANDS, COMMAND_ARGS, COMMAND_NAME_LENGTH, COMMAND_ARG_SIZE, COMMAND_HLP_LENGTH, RESPONSE_SIZE
-typedef CommandParser<32,       2,              16,                     250,                0,              250> MyCommandParser;
+typedef CommandParser<32,       2,              16,                     200,                0,              200> MyCommandParser;
 
 class Command {
 public:
@@ -46,4 +46,4 @@ private:
     static void doAprsPing(MyCommandParser::Argument *args, char *response);
 };
 
-#endif //CUBECELL_MONITORING_COMMAND_H
+#endif //MONITORING_COMMAND_H

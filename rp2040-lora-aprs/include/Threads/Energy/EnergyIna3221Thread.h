@@ -6,7 +6,7 @@
 
 class EnergyIna3221Thread : public EnergyThread {
 public:
-    explicit EnergyIna3221Thread(System *system);
+    explicit EnergyIna3221Thread(System *system, uint16_t *ocv = nullptr, size_t numOcvPoints = 0, uint8_t numCells = 1);
 
     ina3221_ch_t channelBattery;
     ina3221_ch_t channelSolar;

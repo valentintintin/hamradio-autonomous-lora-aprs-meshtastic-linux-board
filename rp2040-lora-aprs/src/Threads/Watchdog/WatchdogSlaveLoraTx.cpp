@@ -8,8 +8,7 @@ WatchdogSlaveLoraTxThread::WatchdogSlaveLoraTxThread(System *system) : WatchdogT
 }
 
 bool WatchdogSlaveLoraTxThread::runOnce() {
-    if (hasFed) {
-        hasFed = false;
+    if (isFed()) {
         Log.traceln(F("[WATCHDOG_LORA_TX] Dog fed"));
         return true;
     }
@@ -25,7 +24,6 @@ bool WatchdogSlaveLoraTxThread::runOnce() {
 
 bool WatchdogSlaveLoraTxThread::feed() {
     Log.infoln(F("[WATCHDOG_LORA_TX] Feed dog"));
-    hasFed = true;
     lastFed = millis();
     return true;
 }

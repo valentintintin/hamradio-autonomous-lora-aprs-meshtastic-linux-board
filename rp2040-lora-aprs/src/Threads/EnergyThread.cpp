@@ -2,8 +2,41 @@
 #include "System.h"
 #include "Threads/EnergyThread.h"
 
-EnergyThread::EnergyThread(System *system, const char *name) : MyThread(system, system->settings.energy.intervalCheck, name) {
+#include <utils.h>
+
+EnergyThread::EnergyThread(System *system, const char *name, uint16_t *ocv, const size_t numOcvPoints, const uint8_t numCells) : MyThread(system, system->settings.energy.intervalCheck, name),
+numCells(numCells), ocv(ocv), numOcvPoints(numOcvPoints) {
     force = true;
+}
+
+uint8_t EnergyThread::getBatteryPercentage() const {
+    if (numOcvPoints == 0 || ocv == nullptr) {
+        return 0;
+    }
+
+    /**
+         * @brief   Battery voltage lookup table interpolation to obtain a more
+         * precise percentage rather than the old proportional one.
+         * @author  Gabriele Russo
+         * @date    06/02/2024
+         */
+    float battery_SOC = 0.0;
+    const uint16_t voltage = getVoltageBattery() / numCells; // single cell voltage (average)
+
+    for (uint8_t i = 0; i < numOcvPoints; i++) {
+        if (ocv[i] <= voltage) {
+            if (i == 0) {
+                battery_SOC = 100.0; // 100% full
+            } else {
+                // interpolate between OCV[i] and OCV[i-1]
+                battery_SOC = static_cast<float>(100.0) / (numOcvPoints - 1.0) *
+                              (numOcvPoints - 1.0 - i + (static_cast<float>(voltage) - ocv[i]) / (ocv[i - 1] - ocv[i]));
+            }
+            break;
+        }
+    }
+
+    return static_cast<uint8_t>(clamp(static_cast<uint16_t>(battery_SOC), 0, 100));
 }
 
 bool EnergyThread::runOnce() {

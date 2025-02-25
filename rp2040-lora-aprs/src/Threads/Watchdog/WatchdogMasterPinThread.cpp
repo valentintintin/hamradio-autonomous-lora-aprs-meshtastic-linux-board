@@ -28,14 +28,12 @@ bool WatchdogMasterPinThread::runOnce() {
         } else if (timerSleep.hasExpired()) { // Not running and timer expired
             gpio->setState(HIGH); // Turn on
             wantToSleep  = false; // Reset state
-            hasFed = false;
         }
 
         return true;
     }
 
-    if (hasFed) {
-        hasFed = false;
+    if (isFed()) {
         Log.traceln(F("[%S] Dog fed"), ThreadName.c_str());
         return true;
     }
@@ -56,7 +54,6 @@ bool WatchdogMasterPinThread::runOnce() {
 
 bool WatchdogMasterPinThread::feed() {
     Log.infoln(F("[%S] Feed dog"), ThreadName.c_str());
-    hasFed = true;
     lastFed = millis();
     return true;
 }

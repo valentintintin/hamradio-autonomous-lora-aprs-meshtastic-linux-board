@@ -129,7 +129,7 @@ typedef struct {
 
 typedef struct {
     char callsign[CALLSIGN_LENGTH];
-    uint32_t time;
+    time_t time;
     float rssi;
     float snr;
     char content[MAX_PACKET_LENGTH];
@@ -151,6 +151,7 @@ typedef struct {
     SettingsLinux linux;
     SettingsRtc rtc;
     bool useInternalWatchdog;
+    bool useSlowClock;
     SettingsAprsCallsignHeard aprsCallsignsHeard[APRS_CALLSIGNS_HEARD_NUMBER];
 
     uint8_t reserved[512];

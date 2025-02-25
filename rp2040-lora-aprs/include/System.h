@@ -5,6 +5,7 @@
 #include <ThreadController.h>
 #include <DS3231.h>
 #include <JsonWriter.h>
+#include <kiss.h>
 
 #include "Communication.h"
 #include "Timer.h"
@@ -32,8 +33,8 @@ public:
     bool begin();
     void loop();
 
-    void setSlowClock();
-    void setTimeToInternalRtc(uint32_t unixtime);
+    void setClock(bool slow);
+    void setTimeToInternalRtc(time_t unixtime);
     bool resetSettings();
     bool saveSettings();
     void addAprsFrameReceivedToHistory(const AprsPacketLite *packet, float snr, float rssi);
@@ -41,7 +42,7 @@ public:
     void planDfu();
     void printSettings();
     void printJson(bool onUsb);
-    void sendToSerial(const uint8_t* data, size_t size);
+    void sendToKissInterface(const uint8_t* data, size_t size);
 
     GpioPin* getGpio(uint8_t pin);
     DateTime getDateTime() const;
@@ -89,7 +90,8 @@ private:
     Timer timerPrintJson = Timer(INTERVAL_PRINT_JSON_USB, true);
     JsonWriter serialJsonWriter = JsonWriter(&Serial);
     JsonWriter serialLinuxJsonWriter = JsonWriter(&Serial1);
-    JsonWriter serialLowPowerJsonWriter = JsonWriter(&Serial2);
+
+    kiss_packet_t kissPacket;
 
     bool loadSettings();
     void setDefaultSettings();

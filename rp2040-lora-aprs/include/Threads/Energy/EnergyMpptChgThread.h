@@ -5,7 +5,7 @@
 
 class EnergyMpptChgThread : public EnergyThread {
 public:
-    explicit EnergyMpptChgThread(System *system);
+    explicit EnergyMpptChgThread(System *system, uint16_t *ocv = nullptr, size_t numOcvPoints = 0);
     void run() override;
 
     bool setPowerOnOff(uint16_t powerOnVoltage, uint16_t powerOffVoltage) const;

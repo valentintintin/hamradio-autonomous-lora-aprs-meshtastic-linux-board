@@ -22,7 +22,6 @@ bool WatchdogSlaveMpptChgThread::init() {
 }
 
 bool WatchdogSlaveMpptChgThread::runOnce() {
-    hasFed = false;
     return managedByUser || feed();
 }
 
@@ -39,7 +38,6 @@ bool WatchdogSlaveMpptChgThread::feed() {
 
     Log.infoln(F("[WATCHDOG_MPPTCHG] Dog fed"));
 
-    hasFed = true;
     lastFed = millis();
 
     return true;

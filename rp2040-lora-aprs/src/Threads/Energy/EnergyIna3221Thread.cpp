@@ -1,8 +1,9 @@
 #include "Threads/Energy/EnergyIna3221Thread.h"
 #include "System.h"
 
-EnergyIna3221Thread::EnergyIna3221Thread(System *system) :
-EnergyThread(system, PSTR("ENERGY_INA3221")), channelBattery(system->settings.energy.inaChannelBattery), channelSolar(system->settings.energy.inaChannelSolar) {}
+EnergyIna3221Thread::EnergyIna3221Thread(System *system, uint16_t *ocv, const size_t numOcvPoints, const uint8_t numCells) :
+EnergyThread(system, PSTR("ENERGY_INA3221"), ocv, numOcvPoints, numCells),
+channelBattery(system->settings.energy.inaChannelBattery), channelSolar(system->settings.energy.inaChannelSolar) {}
 
 bool EnergyIna3221Thread::init() {
     ina3221.begin();

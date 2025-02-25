@@ -20,7 +20,6 @@ public:
     }
 protected:
     uint64_t lastFed = 0;
-    bool hasFed = false;
 };
 
 

@@ -4,6 +4,9 @@
 #include "ArduinoLog.h"
 #include "System.h"
 
+#include <hardware/pll.h>
+#include <hardware/vreg.h>
+
 #include "Threads/Energy/EnergyMpptChgThread.h"
 #include "Threads/Energy/EnergyIna3221Thread.h"
 #include "Threads/Energy/EnergyAdcThread.h"
@@ -15,9 +18,6 @@
 #include "I2CSlave.h"
 #include "utils.h"
 #include "PicoSleep.h"
-
-#define KISS_FEND 0xC0  // Délimiteur de début/fin KISS
-#define KISS_CMD 0x0  // Commande DATA KISS
 
 System::System() : communication(this), command(this) {
     timerReboot.pause();
@@ -41,6 +41,8 @@ bool System::begin() {
 
 //    setDefaultSettings();
 //    saveSettings();
+
+    setClock(settings.useSlowClock);
 
     rtc_init();
     Wire.begin();
@@ -68,14 +70,14 @@ bool System::begin() {
     communication.begin();
 
     ldrBoxOpenedThread = new LdrBoxOpenedThread(this);
-    threadController.add(ldrBoxOpenedThread);
+    // threadController.add(ldrBoxOpenedThread);
 
     switch (settings.energy.type) {
         case dummy:
             energyThread = new EnergyDummyThread(this);
-            break;
+        break;
         case mpptchg:
-            energyThread = new EnergyMpptChgThread(this);
+            energyThread = new EnergyMpptChgThread(this, new uint16_t[11] { 12700, 12500, 12420, 12320, 12200, 12060, 11900, 11750, 11580, 11310, 10500}, 11);
             break;
         case ina:
             energyThread = new EnergyIna3221Thread(this);
@@ -111,8 +113,8 @@ bool System::begin() {
     watchdogLinux = new WatchdogMasterPinThread(this, PSTR("LINUX"), gpioLinuxBoard, settings.linux.intervalTimeoutWatchdog, settings.linux.watchdogEnabled);
     threadController.add(watchdogLinux);
 
-    gpiosPin[gpioI++] = new GpioPin(settings.linux.nprPin, OUTPUT_12MA);
-    gpiosPin[gpioI++] = new GpioPin(settings.linux.wifiPin, OUTPUT_12MA);
+    gpiosPin[gpioI++] = new GpioPin(settings.linux.nprPin, OUTPUT_12MA, false, true);
+    gpiosPin[gpioI++] = new GpioPin(settings.linux.wifiPin, OUTPUT_12MA, false, true);
 
     sendPositionThread = new SendPositionThread(this);
     threadController.add(sendPositionThread);
@@ -166,31 +168,33 @@ void System::loop() {
         }
     } else if (Serial2.available()) {
         streamReceived = &Serial2;
-        Log.traceln(F("Serial UART 1 incoming (debug with slow clock)"));
+        Log.traceln(F("Serial UART 1 incoming (KISS)"));
+
+        if (watchdogLinux->enabled) {
+            watchdogLinux->feed();
+        }
     }
 
     if (streamReceived != nullptr) {
         gpioLed.setState(true);
 
-        size_t lineLength = 1;
-        buffer[0] = streamReceived->read();
-
-        if (buffer[0] == KISS_FEND) {
+        if (streamReceived == &Serial2) {
+            kissPacket = kiss_new_packet(buffer, BUFFER_LENGTH);
+            size_t bytesRead = 0;
             while (streamReceived->available()) {
-                buffer[lineLength++] = streamReceived->read();
-            }
+                buffer[bytesRead++] = streamReceived->read();
 
-            if (buffer[lineLength - 1] != KISS_FEND) {
-                Log.warningln(F("[SERIAL] Received wrong KISS"));
-            } else {
-                lineLength -= 2; // Delete start and stop FENED
+                size_t bytesConsumed = kiss_decode_packet(&kissPacket, buffer, bytesRead);
 
-                Log.traceln(F("[SERIAL] Received KISS size %d. Send it to LoRa"), lineLength);
+                bytesRead -= bytesConsumed;
 
-                communication.sendRaw(buffer, lineLength);
+                if (kissPacket.complete_packet) {
+                    Log.infoln(F("[SERIAL_KISS] Received %d of data from KISS OK"), kissPacket.data_length);
+                    communication.sendRaw(kissPacket.data, kissPacket.data_length);
+                }
             }
         } else {
-            lineLength += streamReceived->readBytesUntil('\n', bufferText + 1, BUFFER_LENGTH - 5);
+            const size_t lineLength = streamReceived->readBytesUntil('\n', bufferText, BUFFER_LENGTH - 5);
             bufferText[lineLength] = '\0';
 
             Log.traceln(F("[SERIAL] Received %s"), bufferText);
@@ -229,12 +233,12 @@ void System::loop() {
     rp2040.wdt_reset();
 }
 
-void System::setTimeToInternalRtc(const uint32_t unixtime) {
-    const auto epoch = unixtime;
+void System::setTimeToInternalRtc(const time_t epoch) {
     datetime_t datetime;
     epoch_to_datetime(epoch, &datetime);
     rtc_set_datetime(&datetime);
-    Log.infoln(F("[RTC] Set internal RTC to date %d/%d/%d %d:%d:%d"), datetime.day, datetime.month, datetime.year, datetime.hour, datetime.min, datetime.sec);
+    getDateTimeStringFromEpoch(epoch, bufferText, BUFFER_LENGTH);
+    Log.infoln(F("[RTC] Set internal RTC to date %s"), bufferText);
 }
 
 bool System::loadSettings() {
@@ -299,28 +303,30 @@ void System::addAprsFrameReceivedToHistory(const AprsPacketLite *packet, const f
 }
 
 bool System::resetSettings() {
-    if (!LittleFS.remove("/config.dat")) {
-        Log.errorln(F("[CONFIG] Fail to delete"));
+    if (!LittleFS.format()) {
+        Log.errorln(F("[CONFIG] Fail to format"));
         return false;
     }
 
     Log.infoln(F("[CONFIG] Deleted"));
-    planReboot();
+
+    loadSettings();
 
     return true;
 }
 
 void System::setDefaultSettings() {
     settings.useInternalWatchdog = true;
+    settings.useSlowClock = false;
 
     settings.lora.frequency = 433.775;
     settings.lora.bandwidth = 125;
     settings.lora.spreadingFactor = 12;
     settings.lora.codingRate = 5;
     settings.lora.outputPower = 12;
-    settings.lora.txEnabled = !isInDebugMode();
+    settings.lora.txEnabled = true;
     settings.lora.watchdogTxEnabled = true;
-    settings.lora.intervalTimeoutWatchdogTx = 720000; // 2 hours
+    settings.lora.intervalTimeoutWatchdogTx = 7200000; // 2 hours
 
     strcpy_P(settings.aprs.call, PSTR("F4HVV-15"));
     strcpy_P(settings.aprs.destination, PSTR("APLV1"));
@@ -333,7 +339,7 @@ void System::setDefaultSettings() {
     settings.aprs.comment[0] = '\0';
     strcpy_P(settings.aprs.status, PSTR("Digi LoRa solaire"));
     settings.aprs.positionWeatherEnabled = true;
-    settings.aprs.intervalPositionWeather = 360000; // 60 minutes
+    settings.aprs.intervalPositionWeather = 3600000; // 60 minutes
     settings.aprs.telemetryEnabled = true;
     settings.aprs.telemetrySequenceNumber = 0;
     settings.aprs.telemetryInPosition = false;
@@ -353,8 +359,8 @@ void System::setDefaultSettings() {
     settings.meshtastic.symbol = '#';
     settings.meshtastic.symbolTable = '\\';
     strcpy_P(settings.meshtastic.itemComment, PSTR("Meshtastic LongModerate 869.4625"));
-    settings.meshtastic.latitude = 45.325766;
-    settings.meshtastic.longitude = 5.636570;
+    settings.meshtastic.latitude = 45.325734;
+    settings.meshtastic.longitude = 5.636680;
     settings.meshtastic.altitude = 850;
 
     settings.mpptWatchdog.enabled = true;
@@ -362,8 +368,8 @@ void System::setDefaultSettings() {
     settings.mpptWatchdog.timeOff = 10; // 10 seconds
     settings.mpptWatchdog.intervalFeed = 30000; // 30 seconds
 
+    settings.energy.type = mpptchg;
     settings.energy.intervalCheck = 60000; // 60 seconds
-    settings.energy.type = isInDebugMode() ? dummy : mpptchg;
     settings.energy.mpptPowerOffVoltage = 11100;
     settings.energy.mpptPowerOnVoltage = 11300;
 
@@ -373,8 +379,8 @@ void System::setDefaultSettings() {
     settings.linux.watchdogEnabled = true;
     settings.linux.intervalTimeoutWatchdog = 1200000; // 20 minutes
     settings.linux.pin = 9;
-    settings.linux.nprPin = 12;
     settings.linux.wifiPin = 11;
+    settings.linux.nprPin = 12;
     settings.linux.aprsSendItemEnabled = false;
     settings.linux.intervalSendItem = 3600000; // 1 hour
     strcpy_P(settings.linux.itemName, PSTR("CAMIP"));
@@ -382,13 +388,13 @@ void System::setDefaultSettings() {
     settings.linux.symbolTable = '/';
     strcpy_P(settings.linux.itemComment, PSTR("f4hvv.valentin-saugnier.fr/f4hvv-15"));
     settings.linux.latitude = 45.325786;
-    settings.linux.longitude = 5.636590;
+    settings.linux.longitude = 5.636669;
     settings.linux.altitude = 850;
 
     settings.rtc.enabled = true;
     settings.rtc.wakeUpPin = 6;
 
-    settings.boxOpened.enabled = true;
+    settings.boxOpened.enabled = false;
     settings.boxOpened.pin = 7;
     settings.boxOpened.intervalCheck = 120000; // 2 minutes
 }
@@ -484,7 +490,8 @@ void System::printSettings() {
     uint8_t frameIndex = 0;
     for (auto &[callsign, time, rssi, snr, content, count, digipeaterCallsign, digipeaterCount, reserved] : settings.aprsCallsignsHeard) {
         if (strlen(callsign) > 0 && strlen(content)) {
-            Log.traceln(F("[CONFIG] APRS Frame received #%d at %u from %s with SNR %F and RSSI %F, content: %s. Digi (%d) and last via %s. Count total %u"), frameIndex++, time, callsign, snr, rssi, content, digipeaterCount, digipeaterCallsign, count);
+            getDateTimeStringFromEpoch(time, bufferText, BUFFER_LENGTH);
+            Log.traceln(F("[CONFIG] APRS Frame received #%d at %s from %s with SNR %F and RSSI %F, content: %s. Digi (%d) and last via %s. Count total %u"), frameIndex++, bufferText, callsign, snr, rssi, content, digipeaterCount, digipeaterCallsign, count);
         }
     }
 }
@@ -507,7 +514,7 @@ void System::printJson(const bool onUsb) {
     }
 
     const bool isBoxOpened = ldrBoxOpenedThread->isBoxOpened(); // Here to avoid log serial
-    JsonWriter *jsonWriter = onUsb ? (isSlowClock ? &serialLowPowerJsonWriter : &serialJsonWriter) : &serialLinuxJsonWriter;
+    JsonWriter *jsonWriter = onUsb ? &serialJsonWriter : &serialLinuxJsonWriter;
 
     auto json = &jsonWriter->beginObject()
             .property(F("uptime"), millis() / 1000)
@@ -594,11 +601,11 @@ void System::printJson(const bool onUsb) {
         if (strlen(callsign) > 0 && strlen(content)) {
             json = &json->beginObject()
             .property(F("callsign"), callsign)
-                .property(F("time"), time)
+                .property(F("time"), static_cast<uint32_t>(time))
                 .property(F("packet"), content)
                 .property(F("snr"), snr)
                 .property(F("rssi"), rssi)
-                .property(F("count"), (uint32_t) count)
+                .property(F("count"), static_cast<uint32_t>(count))
                 .property(F("digipeaterCount"), digipeaterCount)
                 .property(F("digipeaterCallsign"), digipeaterCallsign)
             .endObject();
@@ -612,28 +619,49 @@ void System::printJson(const bool onUsb) {
     }
 }
 
-void System::sendToSerial(const uint8_t* data, size_t size) {
-    Serial.write(KISS_FEND);
-    Serial.write(static_cast<uint8_t>(KISS_CMD));
-    Serial.write(data, size);
-    Serial.write(KISS_FEND);
-    Serial.flush();
+void System::sendToKissInterface(const uint8_t* data, size_t size) {
+    kissPacket = kiss_new_packet(buffer, BUFFER_LENGTH / 2);
 
-    Serial.write(KISS_FEND);
-    Serial.write(static_cast<uint8_t>(KISS_CMD));
-    Serial1.write(data, size);
-    Serial.write(KISS_FEND);
-    Serial1.flush();
+    kissPacket.data_length = size;
+    size = kiss_encode_packet(kissPacket, buffer, BUFFER_LENGTH * 2);
 
-    Serial.write(KISS_FEND);
-    Serial.write(static_cast<uint8_t>(KISS_CMD));
-    Serial2.write(data, size);
-    Serial.write(KISS_FEND);
+    Serial2.write(buffer, size);
     Serial2.flush();
 }
 
-void System::setSlowClock() {
-    isSlowClock = true;
+void System::setClock(const bool slow) {
+    isSlowClock = slow;
+
+    if (!DISABLE_SLOW_CLOCK && slow) {
+        /* Set the system frequency to 18 MHz. */
+        set_sys_clock_khz(18 * KHZ, false);
+        /* The previous line automatically detached clk_peri from clk_sys, and
+           attached it to pll_usb. We need to attach clk_peri back to system PLL to keep SPI
+           working at this low speed.
+           For details see https://github.com/jgromes/RadioLib/discussions/938
+        */
+        clock_configure(clk_peri,
+                        0,                                                // No glitchless mux
+                        CLOCKS_CLK_PERI_CTRL_AUXSRC_VALUE_CLKSRC_PLL_SYS, // System PLL on AUX mux
+                        18 * MHZ,                                         // Input frequency
+                        18 * MHZ                                          // Output (must be same as no divider)
+        );
+        /* Run also ADC on lower clk_sys. */
+        clock_configure(clk_adc, 0, CLOCKS_CLK_ADC_CTRL_AUXSRC_VALUE_CLKSRC_PLL_SYS, 18 * MHZ, 18 * MHZ);
+        /* Run RTC from XOSC since USB clock is off */
+        clock_configure(clk_rtc, 0, CLOCKS_CLK_RTC_CTRL_AUXSRC_VALUE_XOSC_CLKSRC, 12 * MHZ, 47 * KHZ);
+        vreg_set_voltage(VREG_VOLTAGE_0_90);
+        /* Turn off USB PLL */
+        pll_deinit(pll_usb);
+    } else {
+        Serial.begin(115200);
+        Log.begin(LOG_LEVEL_TRACE, &Serial, true, true);
+        delay(2500); // Wait for serial debug
+        Log.infoln(F("[MAIN] Debug mode"));
+    }
+
+    Serial1.begin(115200);
+    Serial2.begin(115200);
 }
 
 GpioPin *System::getGpio(const uint8_t pin) {

@@ -78,26 +78,26 @@ bool Command::processCommand(Stream* stream, const char *command) {
 void Command::doTelemetry(MyCommandParser::Argument *args, char *response) {
     system->sendTelemetriesThread->forceRun();
 
-    strcpy_P(response, PSTR("OK"));
+    strncpy_P(response, PSTR("OK"), MyCommandParser::MAX_RESPONSE_SIZE);
 }
 
 void Command::doPosition(MyCommandParser::Argument *args, char *response) {
     system->sendPositionThread->forceRun();
 
-    strcpy_P(response, PSTR("OK"));
+    strncpy_P(response, PSTR("OK"), MyCommandParser::MAX_RESPONSE_SIZE);
 }
 
 void Command::doTelemetryParams(MyCommandParser::Argument *args, char *response) {
     system->communication.shouldSendTelemetryParams = true;
     system->sendTelemetriesThread->forceRun();
 
-    strcpy_P(response, PSTR("OK"));
+    strncpy_P(response, PSTR("OK"), MyCommandParser::MAX_RESPONSE_SIZE);
 }
 
 void Command::doStatus(MyCommandParser::Argument *args, char *response) {
     system->sendStatusThread->forceRun();
 
-    strcpy_P(response, PSTR("OK"));
+    strncpy_P(response, PSTR("OK"), MyCommandParser::MAX_RESPONSE_SIZE);
 }
 
 void Command::doLora(MyCommandParser::Argument *args, char *response) {
@@ -105,19 +105,19 @@ void Command::doLora(MyCommandParser::Argument *args, char *response) {
 
     const bool ok = system->communication.sendRaw(reinterpret_cast<const uint8_t *>(raw), strlen(raw));
 
-    strcpy_P(response, ok ? PSTR("OK") : PSTR("KO"));
+    strncpy_P(response, ok ? PSTR("OK") : PSTR("KO"), MyCommandParser::MAX_RESPONSE_SIZE);
 }
 
 void Command::doReboot(MyCommandParser::Argument *args, char *response) {
     system->planReboot();
 
-    strcpy_P(response, PSTR("OK"));
+    strncpy_P(response, PSTR("OK"), MyCommandParser::MAX_RESPONSE_SIZE);
 }
 
 void Command::doDfu(MyCommandParser::Argument *args, char *response) {
     system->planDfu();
 
-    strcpy_P(response, PSTR("OK"));
+    strncpy_P(response, PSTR("OK"), MyCommandParser::MAX_RESPONSE_SIZE);
 }
 
 void Command::doGpioOutput(MyCommandParser::Argument *args, char *response) {
@@ -144,12 +144,12 @@ void Command::doGpioOutput(MyCommandParser::Argument *args, char *response) {
 
     if (gpio != nullptr) {
         gpio->setState(state);
-        strcpy_P(response, PSTR("OK"));
+        strncpy_P(response, PSTR("OK"), MyCommandParser::MAX_RESPONSE_SIZE);
         return;
     }
 
     Log.warningln(F("[COMMAND_GPIO] Gpio %s not found"), what);
-    strcpy_P(response, PSTR("KO"));
+    strncpy_P(response, PSTR("KO"), MyCommandParser::MAX_RESPONSE_SIZE);
 }
 
 void Command::doSetSetting(MyCommandParser::Argument *args, char *response) {
@@ -158,7 +158,7 @@ void Command::doSetSetting(MyCommandParser::Argument *args, char *response) {
 
     if (strlen(value) == 0) {
         Log.warningln(F("[COMMAND] Set %s to nothing impossible"), key);
-        strcpy_P(response, PSTR("KO"));
+        strncpy_P(response, PSTR("KO"), MyCommandParser::MAX_RESPONSE_SIZE);
         return;
     }
 
@@ -177,7 +177,7 @@ void Command::doSetSetting(MyCommandParser::Argument *args, char *response) {
         system->setTimeToInternalRtc(epoch);
     } else if (strcmp_P(key, PSTR("reset")) == 0) {
         ok = system->resetSettings();
-        shouldReboot = true;
+        shouldReboot = ok;
     } else if (strcmp_P(key, PSTR("lora.frequency")) == 0) {
         system->settings.lora.frequency = strtof(value, nullptr);
         ok = system->communication.begin();
@@ -406,6 +406,10 @@ void Command::doSetSetting(MyCommandParser::Argument *args, char *response) {
         system->settings.useInternalWatchdog = value[0] == '1';
         system->planReboot();
         shouldReboot = true;
+    } else if (strcmp_P(key, PSTR("useSlowClock")) == 0) {
+        system->settings.useSlowClock = value[0] == '1';
+        system->planReboot();
+        shouldReboot = true;
     } else if (strcmp_P(key, PSTR("aprsReceived")) == 0) {
         for (auto &[callsign, time, rssi, snr, content, count, digipeaterCallsign, digipeaterCount, reserved] : system->settings.aprsCallsignsHeard) {
             callsign[0] = '\0';
@@ -426,172 +430,174 @@ void Command::doSetSetting(MyCommandParser::Argument *args, char *response) {
         ok = system->saveSettings();
 
         if (ok) {
-            strcpy_P(response, PSTR("Set OK "));
+            strncpy_P(response, PSTR("Set OK: "), MyCommandParser::MAX_RESPONSE_SIZE);
 
-            doGetSetting(args, response);
+            doGetSetting(args, response + strlen(response)); // Can have overflow here
 
             if (shouldReboot) {
-                strcat_P(response, PSTR(". Reboot"));
+                strncat_P(response, PSTR(" Reboot"), MyCommandParser::MAX_RESPONSE_SIZE - strlen(response));
             }
 
             return;
         }
     }
 
-    strcpy_P(response, PSTR("KO"));
+    strncpy_P(response, PSTR("KO"), MyCommandParser::MAX_RESPONSE_SIZE);
 }
 
 void Command::doGetSetting(MyCommandParser::Argument *args, char *response) {
     const char *key = args[0].asString;
 
     if (strcmp_P(key, PSTR("lora.frequency")) == 0) {
-        sprintf_P(response, PSTR("%f"), system->settings.lora.frequency);
+        snprintf_P(response, MyCommandParser::MAX_RESPONSE_SIZE, PSTR("%f"), system->settings.lora.frequency);
     } else if (strcmp_P(key, PSTR("lora.bandwidth")) == 0) {
-        sprintf_P(response, PSTR("%d"), system->settings.lora.bandwidth);
+        snprintf_P(response, MyCommandParser::MAX_RESPONSE_SIZE, PSTR("%d"), system->settings.lora.bandwidth);
     } else if (strcmp_P(key, PSTR("lora.spreadingFactor")) == 0) {
-        sprintf_P(response, PSTR("%d"), system->settings.lora.spreadingFactor);
+        snprintf_P(response, MyCommandParser::MAX_RESPONSE_SIZE, PSTR("%d"), system->settings.lora.spreadingFactor);
     } else if (strcmp_P(key, PSTR("lora.codingRate")) == 0) {
-        sprintf_P(response, PSTR("%d"), system->settings.lora.codingRate);
+        snprintf_P(response, MyCommandParser::MAX_RESPONSE_SIZE, PSTR("%d"), system->settings.lora.codingRate);
     } else if (strcmp_P(key, PSTR("lora.outputPower")) == 0) {
-        sprintf_P(response, PSTR("%d"), system->settings.lora.outputPower);
+        snprintf_P(response, MyCommandParser::MAX_RESPONSE_SIZE, PSTR("%d"), system->settings.lora.outputPower);
     } else if (strcmp_P(key, PSTR("lora.txEnabled")) == 0) {
-        sprintf_P(response, PSTR("%d"), system->settings.lora.txEnabled);
+        snprintf_P(response, MyCommandParser::MAX_RESPONSE_SIZE, PSTR("%d"), system->settings.lora.txEnabled);
     } else if (strcmp_P(key, PSTR("lora.watchdogTxEnabled")) == 0) {
-        sprintf_P(response, PSTR("%d"), system->settings.lora.watchdogTxEnabled);
+        snprintf_P(response, MyCommandParser::MAX_RESPONSE_SIZE, PSTR("%d"), system->settings.lora.watchdogTxEnabled);
     } else if (strcmp_P(key, PSTR("lora.intervalTimeoutWatchdogTx")) == 0) {
-        sprintf_P(response, PSTR("%llu"), system->settings.lora.intervalTimeoutWatchdogTx);
+        snprintf_P(response, MyCommandParser::MAX_RESPONSE_SIZE, PSTR("%llu"), system->settings.lora.intervalTimeoutWatchdogTx);
     } else if (strcmp_P(key, PSTR("aprs.call")) == 0) {
-        sprintf_P(response, PSTR("%s"), system->settings.aprs.call);
+        snprintf_P(response, MyCommandParser::MAX_RESPONSE_SIZE, PSTR("%s"), system->settings.aprs.call);
     } else if (strcmp_P(key, PSTR("aprs.destination")) == 0) {
-        sprintf_P(response, PSTR("%s"), system->settings.aprs.destination);
+        snprintf_P(response, MyCommandParser::MAX_RESPONSE_SIZE, PSTR("%s"), system->settings.aprs.destination);
     } else if (strcmp_P(key, PSTR("aprs.path")) == 0) {
-        sprintf_P(response, PSTR("%s"), system->settings.aprs.path);
+        snprintf_P(response, MyCommandParser::MAX_RESPONSE_SIZE, PSTR("%s"), system->settings.aprs.path);
     } else if (strcmp_P(key, PSTR("aprs.comment")) == 0) {
-        sprintf_P(response, PSTR("%s"), system->settings.aprs.comment);
+        snprintf_P(response, MyCommandParser::MAX_RESPONSE_SIZE, PSTR("%s"), system->settings.aprs.comment);
     } else if (strcmp_P(key, PSTR("aprs.status")) == 0) {
-        sprintf_P(response, PSTR("%s"), system->settings.aprs.status);
+        snprintf_P(response, MyCommandParser::MAX_RESPONSE_SIZE, PSTR("%s"), system->settings.aprs.status);
     } else if (strcmp_P(key, PSTR("aprs.symbol")) == 0) {
-        sprintf_P(response, PSTR("%c"), system->settings.aprs.symbol);
+        snprintf_P(response, MyCommandParser::MAX_RESPONSE_SIZE, PSTR("%c"), system->settings.aprs.symbol);
     } else if (strcmp_P(key, PSTR("aprs.symbolTable")) == 0) {
-        sprintf_P(response, PSTR("%c"), system->settings.aprs.symbolTable);
+        snprintf_P(response, MyCommandParser::MAX_RESPONSE_SIZE, PSTR("%c"), system->settings.aprs.symbolTable);
     } else if (strcmp_P(key, PSTR("aprs.latitude")) == 0) {
-        sprintf_P(response, PSTR("%lf"), system->settings.aprs.latitude);
+        snprintf_P(response, MyCommandParser::MAX_RESPONSE_SIZE, PSTR("%lf"), system->settings.aprs.latitude);
     } else if (strcmp_P(key, PSTR("aprs.longitude")) == 0) {
-        sprintf_P(response, PSTR("%lf"), system->settings.aprs.longitude);
+        snprintf_P(response, MyCommandParser::MAX_RESPONSE_SIZE, PSTR("%lf"), system->settings.aprs.longitude);
     } else if (strcmp_P(key, PSTR("aprs.altitude")) == 0) {
-        sprintf_P(response, PSTR("%d"), system->settings.aprs.altitude);
+        snprintf_P(response, MyCommandParser::MAX_RESPONSE_SIZE, PSTR("%d"), system->settings.aprs.altitude);
     } else if (strcmp_P(key, PSTR("aprs.digipeaterEnabled")) == 0) {
-        sprintf_P(response, PSTR("%d"), system->settings.aprs.digipeaterEnabled);
+        snprintf_P(response, MyCommandParser::MAX_RESPONSE_SIZE, PSTR("%d"), system->settings.aprs.digipeaterEnabled);
     } else if (strcmp_P(key, PSTR("aprs.telemetryEnabled")) == 0) {
-        sprintf_P(response, PSTR("%d"), system->settings.aprs.telemetryEnabled);
+        snprintf_P(response, MyCommandParser::MAX_RESPONSE_SIZE, PSTR("%d"), system->settings.aprs.telemetryEnabled);
     } else if (strcmp_P(key, PSTR("aprs.intervalTelemetry")) == 0) {
-        sprintf_P(response, PSTR("%llu"), system->settings.aprs.intervalTelemetry);
+        snprintf_P(response, MyCommandParser::MAX_RESPONSE_SIZE, PSTR("%llu"), system->settings.aprs.intervalTelemetry);
     } else if (strcmp_P(key, PSTR("aprs.statusEnabled")) == 0) {
-        sprintf_P(response, PSTR("%d"), system->settings.aprs.statusEnabled);
+        snprintf_P(response, MyCommandParser::MAX_RESPONSE_SIZE, PSTR("%d"), system->settings.aprs.statusEnabled);
     } else if (strcmp_P(key, PSTR("aprs.intervalStatus")) == 0) {
-        sprintf_P(response, PSTR("%llu"), system->settings.aprs.intervalStatus);
+        snprintf_P(response, MyCommandParser::MAX_RESPONSE_SIZE, PSTR("%llu"), system->settings.aprs.intervalStatus);
     } else if (strcmp_P(key, PSTR("aprs.positionWeatherEnabled")) == 0) {
-        sprintf_P(response, PSTR("%d"), system->settings.aprs.positionWeatherEnabled);
+        snprintf_P(response, MyCommandParser::MAX_RESPONSE_SIZE, PSTR("%d"), system->settings.aprs.positionWeatherEnabled);
     } else if (strcmp_P(key, PSTR("aprs.intervalPositionWeather")) == 0) {
-        sprintf_P(response, PSTR("%llu"), system->settings.aprs.intervalPositionWeather);
+        snprintf_P(response, MyCommandParser::MAX_RESPONSE_SIZE, PSTR("%llu"), system->settings.aprs.intervalPositionWeather);
     } else if (strcmp_P(key, PSTR("aprs.telemetryInPosition")) == 0) {
-        sprintf_P(response, PSTR("%d"), system->settings.aprs.telemetryInPosition);
+        snprintf_P(response, MyCommandParser::MAX_RESPONSE_SIZE, PSTR("%d"), system->settings.aprs.telemetryInPosition);
     } else if (strcmp_P(key, PSTR("aprs.telemetrySequenceNumber")) == 0) {
-        sprintf_P(response, PSTR("%d"), system->settings.aprs.telemetrySequenceNumber);
+        snprintf_P(response, MyCommandParser::MAX_RESPONSE_SIZE, PSTR("%d"), system->settings.aprs.telemetrySequenceNumber);
     } else if (strcmp_P(key, PSTR("meshtastic.watchdogEnabled")) == 0) {
-        sprintf_P(response, PSTR("%d"), system->settings.meshtastic.watchdogEnabled);
+        snprintf_P(response, MyCommandParser::MAX_RESPONSE_SIZE, PSTR("%d"), system->settings.meshtastic.watchdogEnabled);
     } else if (strcmp_P(key, PSTR("meshtastic.intervalTimeoutWatchdog")) == 0) {
-        sprintf_P(response, PSTR("%llu"), system->settings.meshtastic.intervalTimeoutWatchdog);
+        snprintf_P(response, MyCommandParser::MAX_RESPONSE_SIZE, PSTR("%llu"), system->settings.meshtastic.intervalTimeoutWatchdog);
     } else if (strcmp_P(key, PSTR("meshtastic.pin")) == 0) {
-        sprintf_P(response, PSTR("%d"), system->settings.meshtastic.pin);
+        snprintf_P(response, MyCommandParser::MAX_RESPONSE_SIZE, PSTR("%d"), system->settings.meshtastic.pin);
     } else if (strcmp_P(key, PSTR("meshtastic.i2cSlaveEnabled")) == 0) {
-        sprintf_P(response, PSTR("%d"), system->settings.meshtastic.i2cSlaveEnabled);
+        snprintf_P(response, MyCommandParser::MAX_RESPONSE_SIZE, PSTR("%d"), system->settings.meshtastic.i2cSlaveEnabled);
     } else if (strcmp_P(key, PSTR("meshtastic.i2cSlaveAddress")) == 0) {
-        sprintf_P(response, PSTR("0x%x"), system->settings.meshtastic.i2cSlaveAddress);
+        snprintf_P(response, MyCommandParser::MAX_RESPONSE_SIZE, PSTR("0x%x"), system->settings.meshtastic.i2cSlaveAddress);
     } else if (strcmp_P(key, PSTR("meshtastic.aprsSendItemEnabled")) == 0) {
-        sprintf_P(response, PSTR("%d"), system->settings.meshtastic.aprsSendItemEnabled);
+        snprintf_P(response, MyCommandParser::MAX_RESPONSE_SIZE, PSTR("%d"), system->settings.meshtastic.aprsSendItemEnabled);
     } else if (strcmp_P(key, PSTR("meshtastic.intervalSendItem")) == 0) {
-        sprintf_P(response, PSTR("%llu"), system->settings.meshtastic.intervalSendItem);
+        snprintf_P(response, MyCommandParser::MAX_RESPONSE_SIZE, PSTR("%llu"), system->settings.meshtastic.intervalSendItem);
     } else if (strcmp_P(key, PSTR("meshtastic.itemName")) == 0) {
-        sprintf_P(response, PSTR("%s"), system->settings.meshtastic.itemName);
+        snprintf_P(response, MyCommandParser::MAX_RESPONSE_SIZE, PSTR("%s"), system->settings.meshtastic.itemName);
     } else if (strcmp_P(key, PSTR("meshtastic.itemComment")) == 0) {
-        sprintf_P(response, PSTR("%s"), system->settings.meshtastic.itemComment);
+        snprintf_P(response, MyCommandParser::MAX_RESPONSE_SIZE, PSTR("%s"), system->settings.meshtastic.itemComment);
     } else if (strcmp_P(key, PSTR("meshtastic.latitude")) == 0) {
-        sprintf_P(response, PSTR("%lf"), system->settings.meshtastic.latitude);
+        snprintf_P(response, MyCommandParser::MAX_RESPONSE_SIZE, PSTR("%lf"), system->settings.meshtastic.latitude);
     } else if (strcmp_P(key, PSTR("meshtastic.longitude")) == 0) {
-        sprintf_P(response, PSTR("%lf"), system->settings.meshtastic.longitude);
+        snprintf_P(response, MyCommandParser::MAX_RESPONSE_SIZE, PSTR("%lf"), system->settings.meshtastic.longitude);
     } else if (strcmp_P(key, PSTR("meshtastic.altitude")) == 0) {
-        sprintf_P(response, PSTR("%d"), system->settings.meshtastic.altitude);
+        snprintf_P(response, MyCommandParser::MAX_RESPONSE_SIZE, PSTR("%d"), system->settings.meshtastic.altitude);
     } else if (strcmp_P(key, PSTR("mpptWatchdog.enabled")) == 0) {
-        sprintf_P(response, PSTR("%d"), system->settings.mpptWatchdog.enabled);
+        snprintf_P(response, MyCommandParser::MAX_RESPONSE_SIZE, PSTR("%d"), system->settings.mpptWatchdog.enabled);
     } else if (strcmp_P(key, PSTR("mpptWatchdog.timeout")) == 0) {
-        sprintf_P(response, PSTR("%llu"), system->settings.mpptWatchdog.timeout);
+        snprintf_P(response, MyCommandParser::MAX_RESPONSE_SIZE, PSTR("%llu"), system->settings.mpptWatchdog.timeout);
     } else if (strcmp_P(key, PSTR("mpptWatchdog.intervalFeed")) == 0) {
-        sprintf_P(response, PSTR("%llu"), system->settings.mpptWatchdog.intervalFeed);
+        snprintf_P(response, MyCommandParser::MAX_RESPONSE_SIZE, PSTR("%llu"), system->settings.mpptWatchdog.intervalFeed);
     } else if (strcmp_P(key, PSTR("mpptWatchdog.timeOff")) == 0) {
-        sprintf_P(response, PSTR("%d"), system->settings.mpptWatchdog.timeOff);
+        snprintf_P(response, MyCommandParser::MAX_RESPONSE_SIZE, PSTR("%d"), system->settings.mpptWatchdog.timeOff);
     } else if (strcmp_P(key, PSTR("boxOpened.enabled")) == 0) {
-        sprintf_P(response, PSTR("%d"), system->settings.boxOpened.enabled);
+        snprintf_P(response, MyCommandParser::MAX_RESPONSE_SIZE, PSTR("%d"), system->settings.boxOpened.enabled);
     } else if (strcmp_P(key, PSTR("boxOpened.intervalCheck")) == 0) {
-        sprintf_P(response, PSTR("%llu"), system->settings.boxOpened.intervalCheck);
+        snprintf_P(response, MyCommandParser::MAX_RESPONSE_SIZE, PSTR("%llu"), system->settings.boxOpened.intervalCheck);
     } else if (strcmp_P(key, PSTR("boxOpened.pin")) == 0) {
-        sprintf_P(response, PSTR("%d"), system->settings.boxOpened.pin);
+        snprintf_P(response, MyCommandParser::MAX_RESPONSE_SIZE, PSTR("%d"), system->settings.boxOpened.pin);
     } else if (strcmp_P(key, PSTR("weather.enabled")) == 0) {
-        sprintf_P(response, PSTR("%d"), system->settings.weather.enabled);
+        snprintf_P(response, MyCommandParser::MAX_RESPONSE_SIZE, PSTR("%d"), system->settings.weather.enabled);
     } else if (strcmp_P(key, PSTR("weather.intervalCheck")) == 0) {
-        sprintf_P(response, PSTR("%llu"), system->settings.weather.intervalCheck);
+        snprintf_P(response, MyCommandParser::MAX_RESPONSE_SIZE, PSTR("%llu"), system->settings.weather.intervalCheck);
     } else if (strcmp_P(key, PSTR("energy.intervalCheck")) == 0) {
-        sprintf_P(response, PSTR("%llu"), system->settings.energy.intervalCheck);
+        snprintf_P(response, MyCommandParser::MAX_RESPONSE_SIZE, PSTR("%llu"), system->settings.energy.intervalCheck);
     } else if (strcmp_P(key, PSTR("energy.type")) == 0) {
-        sprintf_P(response, PSTR("%d"), system->settings.energy.type);
+        snprintf_P(response, MyCommandParser::MAX_RESPONSE_SIZE, PSTR("%d"), system->settings.energy.type);
     } else if (strcmp_P(key, PSTR("energy.adcPin")) == 0) {
-        sprintf_P(response, PSTR("%d"), system->settings.energy.adcPin);
+        snprintf_P(response, MyCommandParser::MAX_RESPONSE_SIZE, PSTR("%d"), system->settings.energy.adcPin);
     } else if (strcmp_P(key, PSTR("energy.inaChannelBattery")) == 0) {
-        sprintf_P(response, PSTR("%d"), system->settings.energy.inaChannelBattery);
+        snprintf_P(response, MyCommandParser::MAX_RESPONSE_SIZE, PSTR("%d"), system->settings.energy.inaChannelBattery);
     } else if (strcmp_P(key, PSTR("energy.inaChannelSolar")) == 0) {
-        sprintf_P(response, PSTR("%d"), system->settings.energy.inaChannelSolar);
+        snprintf_P(response, MyCommandParser::MAX_RESPONSE_SIZE, PSTR("%d"), system->settings.energy.inaChannelSolar);
     } else if (strcmp_P(key, PSTR("energy.mpptPowerOnVoltage")) == 0) {
-        sprintf_P(response, PSTR("%d"), system->settings.energy.mpptPowerOnVoltage);
+        snprintf_P(response, MyCommandParser::MAX_RESPONSE_SIZE, PSTR("%d"), system->settings.energy.mpptPowerOnVoltage);
     } else if (strcmp_P(key, PSTR("energy.mpptPowerOffVoltage")) == 0) {
-        sprintf_P(response, PSTR("%d"), system->settings.energy.mpptPowerOffVoltage);
+        snprintf_P(response, MyCommandParser::MAX_RESPONSE_SIZE, PSTR("%d"), system->settings.energy.mpptPowerOffVoltage);
     } else if (strcmp_P(key, PSTR("linux.watchdogEnabled")) == 0) {
-        sprintf_P(response, PSTR("%d"), system->settings.linux.watchdogEnabled);
+        snprintf_P(response, MyCommandParser::MAX_RESPONSE_SIZE, PSTR("%d"), system->settings.linux.watchdogEnabled);
     } else if (strcmp_P(key, PSTR("linux.intervalTimeoutWatchdog")) == 0) {
-        sprintf_P(response, PSTR("%llu"), system->settings.linux.intervalTimeoutWatchdog);
+        snprintf_P(response, MyCommandParser::MAX_RESPONSE_SIZE, PSTR("%llu"), system->settings.linux.intervalTimeoutWatchdog);
     } else if (strcmp_P(key, PSTR("linux.pin")) == 0) {
-        sprintf_P(response, PSTR("%d"), system->settings.linux.pin);
+        snprintf_P(response, MyCommandParser::MAX_RESPONSE_SIZE, PSTR("%d"), system->settings.linux.pin);
     } else if (strcmp_P(key, PSTR("linux.nprPin")) == 0) {
-        sprintf_P(response, PSTR("%d"), system->settings.linux.nprPin);
+        snprintf_P(response, MyCommandParser::MAX_RESPONSE_SIZE, PSTR("%d"), system->settings.linux.nprPin);
     } else if (strcmp_P(key, PSTR("linux.wifiPin")) == 0) {
-        sprintf_P(response, PSTR("%d"), system->settings.linux.wifiPin);
+        snprintf_P(response, MyCommandParser::MAX_RESPONSE_SIZE, PSTR("%d"), system->settings.linux.wifiPin);
     } else if (strcmp_P(key, PSTR("linux.aprsSendItemEnabled")) == 0) {
-        sprintf_P(response, PSTR("%d"), system->settings.linux.aprsSendItemEnabled);
+        snprintf_P(response, MyCommandParser::MAX_RESPONSE_SIZE, PSTR("%d"), system->settings.linux.aprsSendItemEnabled);
     } else if (strcmp_P(key, PSTR("linux.intervalSendItem")) == 0) {
-        sprintf_P(response, PSTR("%llu"), system->settings.linux.intervalSendItem);
+        snprintf_P(response, MyCommandParser::MAX_RESPONSE_SIZE, PSTR("%llu"), system->settings.linux.intervalSendItem);
     } else if (strcmp_P(key, PSTR("linux.itemName")) == 0) {
-        sprintf_P(response, PSTR("%s"), system->settings.linux.itemName);
+        snprintf_P(response, MyCommandParser::MAX_RESPONSE_SIZE, PSTR("%s"), system->settings.linux.itemName);
     } else if (strcmp_P(key, PSTR("linux.itemComment")) == 0) {
-        sprintf_P(response, PSTR("%s"), system->settings.linux.itemComment);
+        snprintf_P(response, MyCommandParser::MAX_RESPONSE_SIZE, PSTR("%s"), system->settings.linux.itemComment);
     } else if (strcmp_P(key, PSTR("linux.latitude")) == 0) {
-        sprintf_P(response, PSTR("%lf"), system->settings.linux.latitude);
+        snprintf_P(response, MyCommandParser::MAX_RESPONSE_SIZE, PSTR("%lf"), system->settings.linux.latitude);
     } else if (strcmp_P(key, PSTR("linux.longitude")) == 0) {
-        sprintf_P(response, PSTR("%lf"), system->settings.linux.longitude);
+        snprintf_P(response, MyCommandParser::MAX_RESPONSE_SIZE, PSTR("%lf"), system->settings.linux.longitude);
     } else if (strcmp_P(key, PSTR("linux.altitude")) == 0) {
-        sprintf_P(response, PSTR("%d"), system->settings.linux.altitude);
+        snprintf_P(response, MyCommandParser::MAX_RESPONSE_SIZE, PSTR("%d"), system->settings.linux.altitude);
     } else if (strcmp_P(key, PSTR("rtc.enabled")) == 0) {
-        sprintf_P(response, PSTR("%d"), system->settings.rtc.enabled);
+        snprintf_P(response, MyCommandParser::MAX_RESPONSE_SIZE, PSTR("%d"), system->settings.rtc.enabled);
     } else if (strcmp_P(key, PSTR("rtc.wakeUpPin")) == 0) {
-        sprintf_P(response, PSTR("%d"), system->settings.rtc.wakeUpPin);
+        snprintf_P(response, MyCommandParser::MAX_RESPONSE_SIZE, PSTR("%d"), system->settings.rtc.wakeUpPin);
     } else if (strcmp_P(key, PSTR("useInternalWatchdog")) == 0) {
-        sprintf_P(response, PSTR("%d"), system->settings.useInternalWatchdog);
+        snprintf_P(response, MyCommandParser::MAX_RESPONSE_SIZE, PSTR("%d"), system->settings.useInternalWatchdog);
+    } else if (strcmp_P(key, PSTR("useSlowClock")) == 0) {
+        snprintf_P(response, MyCommandParser::MAX_RESPONSE_SIZE, PSTR("%d"), system->settings.useSlowClock);
     } else if (strcmp_P(key, PSTR("all")) == 0) {
         system->printSettings();
-        strcpy_P(response, PSTR("OK"));
+        strncpy_P(response, PSTR("OK"), MyCommandParser::MAX_RESPONSE_SIZE);
     } else if (strcmp_P(key, PSTR("reset")) == 0) {
         // Ignored: case when set command with reset
     } else {
         Log.warningln(F("[COMMAND] Config key not found"));
-        strcpy_P(response, PSTR("KO"));
+        strncpy_P(response, PSTR("KO"), MyCommandParser::MAX_RESPONSE_SIZE);
     }
 }
 
@@ -605,12 +611,12 @@ void Command::doPrintJson(MyCommandParser::Argument *args, char *response) {
     system->printJson(false);
     system->printJson(true);
 
-    strcpy_P(response, PSTR(""));
+    strncpy_P(response, PSTR(""), MyCommandParser::MAX_RESPONSE_SIZE);
 }
 
 void Command::doPing(MyCommandParser::Argument *args, char *response) {
     Log.infoln(F("Pong !"));
-    strcpy_P(response, PSTR("Pong!"));
+    strncpy_P(response, PSTR("Pong!"), MyCommandParser::MAX_RESPONSE_SIZE);
 }
 
 void Command::doMpptWatchdog(MyCommandParser::Argument *args, char *response) {
@@ -618,19 +624,19 @@ void Command::doMpptWatchdog(MyCommandParser::Argument *args, char *response) {
 
     const bool ok = system->settings.energy.type == mpptchg && system->watchdogSlaveMpptChgThread->setManagedByUser(timeOff);
 
-    strcpy_P(response, ok ? PSTR("OK") : PSTR("KO"));
+    strncpy_P(response, ok ? PSTR("OK") : PSTR("KO"), MyCommandParser::MAX_RESPONSE_SIZE);
 }
 
 void Command::doMeshtasticAprs(MyCommandParser::Argument *args, char *response) {
     system->sendMeshtasticAprsThread->forceRun();
 
-    strcpy_P(response, PSTR("OK"));
+    strncpy_P(response, PSTR("OK"), MyCommandParser::MAX_RESPONSE_SIZE);
 }
 
 void Command::doLinuxAprs(MyCommandParser::Argument *args, char *response) {
     system->sendLinuxAprsThread->forceRun();
 
-    strcpy_P(response, PSTR("OK"));
+    strncpy_P(response, PSTR("OK"), MyCommandParser::MAX_RESPONSE_SIZE);
 }
 
 void Command::doGetBoxInfo(MyCommandParser::Argument *args, char *response) {
@@ -644,11 +650,11 @@ void Command::doGetBoxInfo(MyCommandParser::Argument *args, char *response) {
     const auto temperatureRtc = system->settings.rtc.enabled ? system->rtc.getTemperature() : 0;
     const auto boxOpened = system->ldrBoxOpenedThread->enabled && system->ldrBoxOpenedThread->isBoxOpened();
 
-    sprintf_P(response, PSTR("RTC: %.2f°C | Bat: %.2f°C | Ouverte: %d"), temperatureRtc, temperatureBattery, boxOpened);
+    snprintf_P(response, MyCommandParser::MAX_RESPONSE_SIZE, PSTR("RTC: %.2f°C | Bat: %.2f°C | Ouverte: %d"), temperatureRtc, temperatureBattery, boxOpened);
 }
 
 void Command::doGetError(MyCommandParser::Argument *args, char *response) {
-    sprintf_P(response, PSTR("Energy: %d | Weather: %d | LoRa : %d"), system->energyThread->hasError(), system->weatherThread->hasError(), system->communication.hasError());
+    snprintf_P(response, MyCommandParser::MAX_RESPONSE_SIZE, PSTR("Energy: %d | Weather: %d | LoRa : %d"), system->energyThread->hasError(), system->weatherThread->hasError(), system->communication.hasError());
 }
 
 void Command::doSetLora(MyCommandParser::Argument *args, char *response) {
@@ -660,11 +666,11 @@ void Command::doSetLora(MyCommandParser::Argument *args, char *response) {
 
     bool ok = system->communication.changeLoRaSettings(frequency, bandwidth, spreadingFactor, codingRate, outputPower);
 
-    strcpy_P(response, ok ? PSTR("OK") : PSTR("KO"));
+    strncpy_P(response, ok ? PSTR("OK") : PSTR("KO"), MyCommandParser::MAX_RESPONSE_SIZE);
 }
 
 void Command::doAprsQueryHelp(MyCommandParser::Argument *args, char *response) {
-    strcpy_P(response, PSTR("?APRSP ?APRSD ?APRSL ?APRSH CALL ?APRSV ?PING"));
+    strncpy_P(response, PSTR("?APRSP ?APRSD ?APRSL ?APRSH CALL ?APRSV ?PING"), MyCommandParser::MAX_RESPONSE_SIZE);
 }
 
 // ?APRSD
@@ -674,19 +680,23 @@ void Command::doAprsHeardWithoutDigi(MyCommandParser::Argument *args, char *resp
     constexpr int maxTime = 3600 * hours;
 
     for (auto &[callsign, time, rssi, snr, content, count, digipeaterCallsign, digipeaterCount, reserved] : system->settings.aprsCallsignsHeard) {
-        if (strlen(callsign) > 0 && strlen(content) && strlen(digipeaterCallsign) == 0 && digipeaterCount == 0) {
+        if (strlen(response) >= MyCommandParser::MAX_RESPONSE_SIZE - 10) {
+            return;
+        }
+
+        if (strlen(callsign) > 0 && strlen(content) > 0 && strlen(digipeaterCallsign) == 0 && digipeaterCount == 0) {
             if (strlen(response) > 0) {
-                strcat_P(response, PSTR(" "));
+                strncat_P(response, PSTR(" "), MyCommandParser::MAX_RESPONSE_SIZE - strlen(response));
             }
 
             if (now - time <= maxTime) {
-                strcat_P(response, callsign);
+                strncat_P(response, callsign, MyCommandParser::MAX_RESPONSE_SIZE - strlen(response));
             }
         }
     }
 
     if (strlen(response) == 0) {
-        sprintf_P(response, PSTR("Personne depuis %d heures"), hours);
+        snprintf_P(response, MyCommandParser::MAX_RESPONSE_SIZE, PSTR("Personne depuis %d heures"), hours);
     }
 }
 
@@ -697,41 +707,46 @@ void Command::doAprsHeard(MyCommandParser::Argument *args, char *response) {
     constexpr int maxTime = 3600 * hours;
 
     for (auto &[callsign, time, rssi, snr, content, count, digipeaterCallsign, digipeaterCount, reserved] : system->settings.aprsCallsignsHeard) {
-        if (strlen(callsign) > 0 && strlen(content)) {
+        if (strlen(response) >= MyCommandParser::MAX_RESPONSE_SIZE - 10) {
+            return;
+        }
+
+        if (strlen(callsign) > 0 && strlen(content) > 0) {
             if (strlen(response) > 0) {
-                strcat_P(response, PSTR(" "));
+                strncat_P(response, PSTR(" "), MyCommandParser::MAX_RESPONSE_SIZE - strlen(response));
             }
 
             if (now - time <= maxTime) {
-                sprintf_P(response, PSTR("%s(%d)"), callsign, digipeaterCount);
+                snprintf_P(response + strlen(response), MyCommandParser::MAX_RESPONSE_SIZE - strlen(response), PSTR("%s(%d)"), callsign, digipeaterCount);
             }
         }
     }
 
     if (strlen(response) == 0) {
-        sprintf_P(response, PSTR("Personne depuis %d heures"), hours);
+        snprintf_P(response, MyCommandParser::MAX_RESPONSE_SIZE, PSTR("Personne depuis %d heures"), hours);
     }
 }
 
 // ?APRSH CALL
 void Command::doAprsHeardSomeone(MyCommandParser::Argument *args, char *response) {
     for (auto &[callsign, time, rssi, snr, content, count, digipeaterCallsign, digipeaterCount, reserved] : system->settings.aprsCallsignsHeard) {
-        if (strcmp(callsign, args[0].asString) == 0) {
-            sprintf_P(response, PSTR("SNR: %.2f RSSI: %.2f Epoch: %ld Digi: %d Last: %s Count: %llu"), snr, rssi, time, digipeaterCount, digipeaterCallsign, count);
+        if (strcasecmp(callsign, args[0].asString) == 0) {
+            getDateTimeStringFromEpoch(time, bufferText, BUFFER_LENGTH);
+            snprintf_P(response, MyCommandParser::MAX_RESPONSE_SIZE, PSTR("%s SNR:%.2f RSSI:%.2f Digi:%d Last:%s Count:%llu"), bufferText, snr, rssi, digipeaterCount, digipeaterCallsign, count);
             return;
         }
     }
 
-    strcpy_P(response, PSTR("Pas entendu"));
+    snprintf_P(response, MyCommandParser::MAX_RESPONSE_SIZE, PSTR("%s pas entendu"), args[0].asString);
 }
 
 void Command::doAbout(MyCommandParser::Argument *args, char *response) {
-    sprintf_P(response, PSTR("%s %s %s %s"), system->settings.aprs.comment, system->settings.aprs.status, system->settings.meshtastic.itemComment, system->settings.linux.itemComment);
+    snprintf_P(response, MyCommandParser::MAX_RESPONSE_SIZE, PSTR("%s %s %s %s"), system->settings.aprs.comment, system->settings.aprs.status, system->settings.meshtastic.itemComment, system->settings.linux.itemComment);
 }
 
 void Command::doAprsPing(MyCommandParser::Argument *args, char *response) {
     if (system->lastAprsHeard != nullptr) {
-        sprintf_P(response, "Pong %s! SNR: %.2f RSSI: %.2f", system->lastAprsHeard->callsign, system->lastAprsHeard->snr, system->lastAprsHeard->rssi);
+        snprintf_P(response, MyCommandParser::MAX_RESPONSE_SIZE, "Pong %s! SNR: %.2f RSSI: %.2f", system->lastAprsHeard->callsign, system->lastAprsHeard->snr, system->lastAprsHeard->rssi);
     } else {
         doPing(args, response);
     }
